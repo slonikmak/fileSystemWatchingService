@@ -191,7 +191,8 @@ public class FileSystemWatchingService {
     }
 
     public static void main(String[] args) throws IOException {
-        Path dir = Paths.get("c:/temp");
+        //Path dir = Paths.get("/home/anton/Документы/temp");
+        Path dir = Paths.get("/home/anton/Документы/temp");
         new FileSystemWatchingService(dir).processEvents();
     }
 }
