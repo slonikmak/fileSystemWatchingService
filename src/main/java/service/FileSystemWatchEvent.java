@@ -3,9 +3,12 @@ package service;
 import java.nio.file.Path;
 
 /**
- * Created by Anton on 25.02.2017.
+ * event for external processing
  */
 public class FileSystemWatchEvent {
+    /**
+     * Event types
+     */
     public enum Type{
         CREATE, DELETE, MOVE, RENAME, UPDATE
     }
@@ -13,12 +16,23 @@ public class FileSystemWatchEvent {
     private Path pathFrom;
     private Path pathTo;
 
+    /**
+     * Constructor for CREATE, DELETE and MODIFY events
+     * @param type event type
+     * @param pathFrom path to changed file
+     */
     public FileSystemWatchEvent(Type type, Path pathFrom) {
         this.type = type;
         this.pathFrom = pathFrom;
         this.pathTo = null;
     }
 
+    /**
+     * Constructor for MOVE or RENAME events
+     * @param type event type
+     * @param pathFrom path to changed file
+     * @param pathTo new name or destination file
+     */
     public FileSystemWatchEvent(Type type, Path pathFrom, Path pathTo) {
         this.type = type;
         this.pathFrom = pathFrom;

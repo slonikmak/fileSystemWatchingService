@@ -1,9 +1,13 @@
 package service;
 
 /**
- * Created by Anton on 25.02.2017.
+ * Interface fo external event listeners
  */
 @FunctionalInterface
 public interface FileSystemEventListener {
+    /**
+     *
+     * @param event FileSystemWatchEvent
+     */
     void processEvent(FileSystemWatchEvent event);
 }
