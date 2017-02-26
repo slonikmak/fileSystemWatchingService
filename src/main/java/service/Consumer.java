@@ -1,15 +1,21 @@
 package service;
 
+import javafx.util.Pair;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.WatchEvent;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
 import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
 
 /**
  * Class for transform native event to FileSystemWatchEvent
@@ -20,133 +26,142 @@ import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE;
  *
  */
 public class Consumer implements Runnable{
-    //queue for unprocessed events
-    private BlockingQueue<InnerWatchEvent> createQueue;
-    private FileSystemWatchingService service;
-    private boolean isStoped;
 
-    /**
-     *
-     * @param service ref to FileSystemWatchingService
-     */
-    Consumer(FileSystemWatchingService service){
-        this.createQueue = new LinkedBlockingQueue<>();
+    private CopyOnWriteArrayList<Pair<Path, List<WatchEvent<?>>>> newQueue = new CopyOnWriteArrayList<>();
+    private BlockingQueue<Pair<Path, List<WatchEvent<?>>>> queue;
+    private BlockingQueue<Pair<Path, WatchEvent<?>>> bufferQueue = new LinkedBlockingQueue<>();
+    private FileSystemWatchingService service;
+
+    Consumer(BlockingQueue<Pair<Path, List<WatchEvent<?>>>> queue, FileSystemWatchingService service) {
+        this.queue = queue;
         this.service = service;
     }
 
-    /**
-     *initial event handling and determination RENAME events
-     * @param events list ov native events from native WatchService
-     * @param dir directory in which the events occurred
-     */
-    void adaptEvent(List<WatchEvent<?>> events, Path dir){
-        for (int i = 0; i < events.size(); i++) {
-            //get native event
-            @SuppressWarnings("rawtypes")
-            WatchEvent<Path> event = (WatchEvent<Path>) events.get(i);
-
-            //get type of event
-            WatchEvent.Kind kind = event.kind();
-
-            // Context for directory entry event is the file name of entry
-            @SuppressWarnings("unchecked")
-            Path name = event.context();
-            Path child = dir.resolve(name);
-
-            //determination RENAME events
-            if (events.size()>1){
-                if (i<events.size()-1){
-                    @SuppressWarnings("rawtypes")
-                    WatchEvent<Path> nextEvent = (WatchEvent<Path>) events.get(i+1);
-                    WatchEvent.Kind nextKind = nextEvent.kind();
-                    Path nextName = nextEvent.context();
-                    Path nextChild = dir.resolve(nextName);
-                    if (kind.name().equals("ENTRY_DELETE") && nextKind.name().equals("ENTRY_CREATE") &&
-                            child.getParent().equals(nextChild.getParent())){
-                        //System.out.println("RENAME from "+child+" to "+nextChild);
-                        service.runEventListeners(new FileSystemWatchEvent(FileSystemWatchEvent.Type.RENAME, child, nextChild));
-                        i++;
-                        continue;
-                    }
-                }
-                //if event is not RENAME add it to the queue
-                createQueue.add(new InnerWatchEvent(child, event));
-            } else createQueue.add(new InnerWatchEvent(child, event));
-
-            // print out event
-            //System.out.format("%s: %s\n", event.kind().name(), child);
-
-            // if directory is created, and watching recursively, then register it and its sub-directories
-            if (kind == ENTRY_CREATE) {
-                try {
-                    if (Files.isDirectory(child)) {
-                        service.walkAndRegisterDirectories(child);
-                    }
-                } catch (IOException x) {
-                    // do something useful
-                }
-            }
-        }
-    }
-
-    /**
-     * Thread that scans all raw events from queue and determine other events
-     *
-     */
     @Override
     public void run() {
-
-        while (!isStoped){
+        while (true) {
             try {
-                Thread.sleep(20);
+                Thread.sleep(100);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
-            //get event from queue
-            InnerWatchEvent innerWatchEvent = createQueue.poll();
 
-            //queue scan to determine the pair event
-            if (innerWatchEvent!=null){
-                WatchEvent<Path> event = innerWatchEvent.event;
-                Path name = event.context().getFileName();
+            if (queue.size() > 0) {
+                new Thread(() -> {
+
+                    newQueue.addAll(queue);
+                    queue.removeAll(newQueue);
+
+                    for (Pair<Path, List<WatchEvent<?>>> pair : newQueue) {
+
+                        List<WatchEvent<?>> events = pair.getValue();
+                        Path dir = pair.getKey();
+
+                        for (int j = 0; j < events.size(); j++) {
+                            WatchEvent<?> event = events.get(j);
+
+                            @SuppressWarnings("rawtypes")
+                            WatchEvent.Kind kind = event.kind();
+                            // Context for directory entry event is the file name of entry
+                            @SuppressWarnings("unchecked")
+                            Path name = ((WatchEvent<Path>) event).context();
+                            Path child = dir.resolve(name);
+                            // print out event
+                            //System.out.format("%s: %s\n", event.kind().name(), child);
+
+                            if (((WatchEvent<Path>) event).kind().equals(ENTRY_MODIFY)) {
+                                //System.out.println(event.kind());
+                                service.runEvents(new FileSystemWatchEvent(FileSystemWatchEvent.Type.MODIFY, child));
+                            } else {
+                                if (events.size() > 1) {
+                                    if (j < events.size() - 1) {
+                                        @SuppressWarnings("unchecked")
+                                        WatchEvent<Path> nextEvent = (WatchEvent<Path>) events.get(j + 1);
+                                        WatchEvent.Kind nextKind = nextEvent.kind();
+                                        Path nextName = nextEvent.context();
+                                        Path nextChild = dir.resolve(nextName);
+                                        if (kind.name().equals("ENTRY_DELETE") && nextKind.name().equals("ENTRY_CREATE") &&
+                                                child.getParent().equals(nextChild.getParent())) {
+                                            //System.out.println("RENAME from "+child+" to "+nextChild);
+                                            service.runEvents(new FileSystemWatchEvent(FileSystemWatchEvent.Type.RENAME, child, nextChild));
+                                            j++;
+                                            continue;
+                                        }
+                                    }
+                                    bufferQueue.add(new Pair<>(dir, event));
+                                } else {
+                                    bufferQueue.add(new Pair<>(dir, event));
+                                }
+                            }
+
+
+                            // if directory is created, and watching recursively, then register it and its sub-directories
+                            if (kind == ENTRY_CREATE) {
+                                try {
+                                    if (Files.isDirectory(child)) {
+                                        service.walkAndRegisterDirectories(child);
+                                    }
+                                } catch (IOException x) {
+                                    // do something useful
+                                }
+                            }
+                        }
+                    }
+
+                    checkOtherEvents(bufferQueue);
+                    newQueue.clear();
+
+                }).start();
+            }
+
+        }
+    }
+
+
+    private void checkOtherEvents(BlockingQueue<Pair<Path, WatchEvent<?>>> queue) {
+        List<Pair<Path, WatchEvent<?>>> doneList = new ArrayList<>();
+        for (Pair<Path, WatchEvent<?>> p : queue) {
+            if (p != null && !doneList.contains(p)) {
+                @SuppressWarnings("unchecked")
+                WatchEvent<Path> event = (WatchEvent<Path>) p.getValue();
+                Path name = event.context();
                 final boolean[] done = {false};
-                //if above we have DELETE event -> looking for a suitable event CREATE
-                //if not found, then the event is DELETE
-                if (event.kind().equals(ENTRY_DELETE)){
-                    createQueue.forEach(e -> {
-                        WatchEvent<Path> ev = e.event;
-                        if (ev.kind().equals(ENTRY_CREATE) && ev.context().getFileName().equals(name)){
-                            //System.out.println("move from "+innerWatchEvent.path +" to "+e.path);
-                            service.runEventListeners(new FileSystemWatchEvent(FileSystemWatchEvent.Type.MOVE, innerWatchEvent.path, e.path));
-                            createQueue.remove(e);
-                            createQueue.remove(innerWatchEvent);
+
+                WatchEvent.Kind<Path> from = event.kind();
+                WatchEvent.Kind<Path> to = from.equals(ENTRY_DELETE)?ENTRY_CREATE:ENTRY_DELETE;
+
+                queue.forEach(e -> {
+                    if (!doneList.contains(e)){
+                        WatchEvent<Path> ev = (WatchEvent<Path>) e.getValue();
+                        Path newName = ev.context();
+                        if (ev.kind().equals(to) && newName.equals(name)) {
+                            if (from.equals(ENTRY_DELETE)) {
+                                //System.out.println("move from " + p.getKey().resolve(name) + " to " + p.getKey().resolve(name));
+                                service.runEvents(new FileSystemWatchEvent(FileSystemWatchEvent.Type.MOVE, p.getKey().resolve(name), e.getKey().resolve(name)));
+                            }
+                            else {
+                                //System.out.println("move from " + e.getKey().resolve(newName) + " to " + p.getKey().resolve(name));
+                                service.runEvents(new FileSystemWatchEvent(FileSystemWatchEvent.Type.MOVE, e.getKey().resolve(name), p.getKey().resolve(name)));
+                            }
+                            queue.remove(e);
+                            doneList.add(e);
                             done[0] = true;
                         }
-                    });
-                    if (!done[0]) {
-                        //System.out.println("delete "+innerWatchEvent.path);
-                        service.runEventListeners(new FileSystemWatchEvent(FileSystemWatchEvent.Type.DELETE, innerWatchEvent.path));
-                        done[0] = false;
                     }
-                    //if above we have CREATE event -> looking for a suitable event DELETE
-                    //if not found, then the event is CREATE
-                } else if(event.kind().equals(ENTRY_CREATE)){
-                    createQueue.forEach(e -> {
-                        WatchEvent<Path> ev = e.event;
-                        if (ev.kind().equals(ENTRY_DELETE) && ev.context().getFileName().equals(name)){
-                            //System.out.println("move from "+e.path +" to "+innerWatchEvent.path);
-                            service.runEventListeners(new FileSystemWatchEvent(FileSystemWatchEvent.Type.MOVE, e.path, innerWatchEvent.path));
-                            createQueue.remove(e);
-                            createQueue.remove(innerWatchEvent);
-                        }
-                    });
-                    if (!done[0]) {
-                        //System.out.println("create "+innerWatchEvent.pathFrom);
-                        service.runEventListeners(new FileSystemWatchEvent(FileSystemWatchEvent.Type.CREATE, innerWatchEvent.path));
-                        done[0] = false;
-                    }
+
+                });
+
+                if (!done[0]) {
+                    //System.out.println(from.toString() + p.getKey().resolve(name));
+                    FileSystemWatchEvent.Type eventType = from.equals(ENTRY_CREATE)?FileSystemWatchEvent.Type.CREATE:FileSystemWatchEvent.Type.DELETE;
+                    service.runEvents(new FileSystemWatchEvent(eventType, p.getKey().resolve(name)));
+                    done[0] = false;
                 }
+
             }
+            queue.remove(p);
+            doneList.add(p);
         }
+        //queue.clear();
     }
 }

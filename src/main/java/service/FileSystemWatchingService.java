@@ -1,5 +1,7 @@
 package service;
 
+import javafx.util.Pair;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -20,35 +22,28 @@ import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
  */
 public class FileSystemWatchingService {
 
-    //default Watch service
+    private List<FileSystemEventListener> listeners = new ArrayList<>();
+
+
     private final WatchService watcher;
-    ////Map contains pairs <WatchKey, Path> for take full path from keys
     private final Map<WatchKey, Path> keys;
-    //native events handler
-    private final Consumer consumer;
-    //Watch event listeners
-    private final List<FileSystemEventListener> listeners = new ArrayList<>();
-    //flag for stop service
-    private static boolean isStoped = false;
+
+    BlockingQueue<Pair<Path, List<WatchEvent<?>>>> queue = new LinkedBlockingQueue<>();
 
     /**
      * Creates a WatchService and registers the given directory
-     * @param dir root watched directory
-     * @throws IOException
      */
     FileSystemWatchingService(Path dir) throws IOException {
-        //get default watching service
         this.watcher = FileSystems.getDefault().newWatchService();
-        this.keys = new HashMap<>();
-        consumer = new Consumer(this);
+        this.keys = new HashMap<WatchKey, Path>();
+
+        new Thread(new Consumer(queue, this)).start();
+
         walkAndRegisterDirectories(dir);
-        new Thread(consumer).start();
     }
 
     /**
      * Register the given directory with the WatchService; This function will be called by FileVisitor
-     * @param dir registered directory
-     * @throws IOException
      */
     private void registerDirectory(Path dir) throws IOException {
         WatchKey key = dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
@@ -57,10 +52,8 @@ public class FileSystemWatchingService {
 
     /**
      * Register the given directory, and all its sub-directories, with the WatchService.
-     * @param start parent directory
-     * @throws IOException
      */
-    void walkAndRegisterDirectories(final Path start) throws IOException {
+    public void walkAndRegisterDirectories(final Path start) throws IOException {
         // register directory and sub-directories
         Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
             @Override
@@ -72,10 +65,11 @@ public class FileSystemWatchingService {
     }
 
     /**
-     * Process all native events for keys queued to the watcher
+     * Process all events for keys queued to the watcher
      */
-    void processEvents() {
-        for (;;) {
+    private void processEvents() {
+        for (; ; ) {
+
             // wait for key to be signalled
             WatchKey key;
             try {
@@ -84,18 +78,16 @@ public class FileSystemWatchingService {
                 return;
             }
 
-            //get bind path
             Path dir = keys.get(key);
             if (dir == null) {
                 System.err.println("WatchKey not recognized!!");
                 continue;
             }
-            //get events from key
+
             List<WatchEvent<?>> events = key.pollEvents();
 
-            //process events
-            //in this method native events transforms to FileSystemWatchEvent
-            consumer.adaptEvent(events, dir);
+            Pair<Path, List<WatchEvent<?>>> eventsSet = new Pair<>(dir, events);
+            queue.add(eventsSet);
 
             // reset key and remove from set if directory no longer accessible
             boolean valid = key.reset();
@@ -110,37 +102,19 @@ public class FileSystemWatchingService {
         }
     }
 
-    /**
-     * Stop service
-     */
-    public void stopService(){
-        isStoped = true;
+    public void addEventListeners(FileSystemEventListener listener){
+        listeners.add(listener);
     }
 
-    /**
-     * Add event listeners
-     * @param eventListener
-     */
-    public void addEventListner(FileSystemEventListener eventListener){
-        listeners.add(eventListener);
-    }
-
-    /**
-     * run event listeners
-     * @param event
-     */
-    void runEventListeners(FileSystemWatchEvent event){
-        for (FileSystemEventListener l :
-                listeners) {
-            l.processEvent(event);
-        }
+    public void runEvents(FileSystemWatchEvent event){
+        listeners.forEach(l->l.processEvent(event));
     }
 
     public static void main(String[] args) throws IOException {
-        //Path dir = Paths.get("/home/anton/Документы/temp");
-        Path dir = Paths.get("C:/temp");
+        Path dir = Paths.get("c:/temp");
+
         FileSystemWatchingService service = new FileSystemWatchingService(dir);
-        service.addEventListner(e-> System.out.println(e));
+        service.addEventListeners(System.out::println);
         service.processEvents();
     }
 }
