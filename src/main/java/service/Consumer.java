@@ -84,7 +84,11 @@ public class Consumer implements Runnable{
                                                 child.getParent().equals(nextChild.getParent())) {
                                             //System.out.println("RENAME from "+child+" to "+nextChild);
                                             service.runEvents(new FileSystemWatchEvent(FileSystemWatchEvent.Type.RENAME, child, nextChild));
+                                            service.replaceKey(child, nextChild);
                                             j++;
+
+
+
                                             continue;
                                         }
                                     }
@@ -146,6 +150,7 @@ public class Consumer implements Runnable{
                             queue.remove(e);
                             doneList.add(e);
                             done[0] = true;
+
                         }
                     }
 
@@ -154,9 +159,21 @@ public class Consumer implements Runnable{
                 if (!done[0]) {
                     //System.out.println(from.toString() + p.getKey().resolve(name));
                     FileSystemWatchEvent.Type eventType = from.equals(ENTRY_CREATE)?FileSystemWatchEvent.Type.CREATE:FileSystemWatchEvent.Type.DELETE;
+
+                    /*if (from == ENTRY_CREATE) {
+                        try {
+                            if (Files.isDirectory(p.getKey().resolve(name))) {
+                                service.walkAndRegisterDirectories(p.getKey().resolve(name));
+                            }
+                        } catch (IOException x) {
+                            // do something useful
+                        }
+                    }*/
+
                     service.runEvents(new FileSystemWatchEvent(eventType, p.getKey().resolve(name)));
                     done[0] = false;
                 }
+
 
             }
             queue.remove(p);
