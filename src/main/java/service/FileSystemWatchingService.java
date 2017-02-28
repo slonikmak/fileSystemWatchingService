@@ -125,30 +125,30 @@ public class FileSystemWatchingService {
                     break;
                 }
             }
+
+
         }
     }
 
     void replaceKey(Path child, Path nextChild) {
-        System.out.println("Cancel "+child);
-        /*
-*/
-        keys.forEach((key, path) -> {
-            if (path.equals(child)) path = nextChild;
-        });
-    }
-    void deleteKey(Path path){
-        Set<WatchKey> keySet = keys.entrySet()
-                .stream()
-                .filter(entry -> Objects.equals(entry.getValue(), path))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
-        keySet.forEach(k->{
-            k.cancel();
-            keys.remove(k);
 
-        });
+        Map.Entry<WatchKey, Path> result = removeKey(child);
+        if (result!=null) keys.put(result.getKey(), nextChild);
+
     }
 
+    Map.Entry<WatchKey, Path> removeKey(Path path){
+        Map.Entry<WatchKey, Path> result = null;
+        for (Map.Entry<WatchKey, Path> entry :
+                keys.entrySet()) {
+            if (path.equals(entry.getValue())) {
+                result = entry;
+                break;
+            }
+        }
+        keys.remove(result.getKey());
+        return result;
+    }
 
     /**
      * add event listeners

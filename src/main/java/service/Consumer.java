@@ -160,6 +160,8 @@ public class Consumer implements Runnable{
                     //System.out.println(from.toString() + p.getKey().resolve(name));
                     FileSystemWatchEvent.Type eventType = from.equals(ENTRY_CREATE)?FileSystemWatchEvent.Type.CREATE:FileSystemWatchEvent.Type.DELETE;
 
+                    //if (from == ENTRY_DELETE) service.removeKey(p.getKey().resolve(name));
+
                     /*if (from == ENTRY_CREATE) {
                         try {
                             if (Files.isDirectory(p.getKey().resolve(name))) {
