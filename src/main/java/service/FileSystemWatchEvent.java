@@ -39,14 +39,26 @@ public class FileSystemWatchEvent {
         this.pathTo = pathTo;
     }
 
+    /**
+     *
+     * @return type of event
+     */
     public Type getType() {
         return type;
     }
 
+    /**
+     *
+     * @return path to the item where the event occurred
+     */
     public Path getPathFrom() {
         return pathFrom;
     }
 
+    /**
+     *
+     * @return path to the item after renaming
+     */
     public Path getPathTo() {
         return pathTo;
     }

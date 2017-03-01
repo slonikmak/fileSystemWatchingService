@@ -35,6 +35,9 @@ public class FileSystemWatchingService {
     //Map for storage of keys and related pathways
     private final Map<WatchKey, Path> keys;
 
+    //flag for stopping service
+    private boolean isAlive = true;
+
     //Map for storage events and related path
     //when an event occurs in some folder Watch service add them to related key
     //and then events from key and related path add to this queue
@@ -48,7 +51,7 @@ public class FileSystemWatchingService {
      */
     public FileSystemWatchingService(Path dir) throws IOException {
         this.watcher = FileSystems.getDefault().newWatchService();
-        this.keys = new HashMap<WatchKey, Path>();
+        this.keys = new HashMap<>();
 
         new Thread(new Consumer(queue, this)).start();
 
@@ -87,7 +90,7 @@ public class FileSystemWatchingService {
      * Process all events for keys queued to the watcher
      */
     private void processEvents() {
-        for (; ; ) {
+        while (isAlive){
 
             // wait for key to be signalled
             //multiple events packed into key
@@ -130,13 +133,21 @@ public class FileSystemWatchingService {
         }
     }
 
-    void replaceKey(Path child, Path nextChild) {
-
-        Map.Entry<WatchKey, Path> result = removeKey(child);
-        if (result!=null) keys.put(result.getKey(), nextChild);
-
+    /**
+     * replacement path associated key when you rename a folder
+     * @param from old path
+     * @param to new path
+     */
+    void replaceKey(Path from, Path to) {
+        Map.Entry<WatchKey, Path> result = removeKey(from);
+        if (result!=null) keys.put(result.getKey(), to);
     }
 
+    /**
+     * remove key from keys collection
+     * @param path path associated key
+     * @return
+     */
     Map.Entry<WatchKey, Path> removeKey(Path path){
         Map.Entry<WatchKey, Path> result = null;
         for (Map.Entry<WatchKey, Path> entry :
@@ -166,6 +177,13 @@ public class FileSystemWatchingService {
      */
     public void runEvents(FileSystemWatchEvent event) {
         listeners.forEach(l -> l.processEvent(event));
+    }
+
+    /**
+     * stop service
+     */
+    public void stop(){
+        isAlive = false;
     }
 
     public static void main(String[] args) throws IOException {
